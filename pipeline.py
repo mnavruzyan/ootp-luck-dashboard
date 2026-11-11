@@ -44,7 +44,7 @@ REPORTS_BASE = "https://{host}/{slug}/reports/news/html/{path}"
 MODERN_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/124.0.0.0 Safari/537.36"
+    "Chrome/157.0.0.0 Safari/537.36"
 )
 
 
