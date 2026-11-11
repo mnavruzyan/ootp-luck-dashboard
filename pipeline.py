@@ -51,7 +51,7 @@ MODERN_UA = (
 
 
 def _api_get(slug: str, token: str, endpoint: str, stream: bool = False,
-             max_wait_s: int = 180, status_cb=None):
+             max_wait_s: int = 400, status_cb=None):
     """
     GET a StatsPlus API endpoint. The API answers rate-limited calls with HTTP 200 and the
     text "Request too soon, wait N seconds before requesting again", so detect that and retry.
@@ -441,15 +441,11 @@ def _parse_gm_page(html: str, gm_id: int) -> dict | None:
             w = l = 0
         post = cells[i_post] if i_post < len(cells) else ""
         made_playoffs = bool(post and post != "-")
-        post_l = post.lower()
-        won_championship = "won world series" in post_l or "won championship" in post_l
-        round_reached = 1 if made_playoffs else 0
-        for kw, rnd in [("division series", 2), ("championship series", 3),
-                        ("world series", 4)]:
-            if kw in post_l:
-                round_reached = max(round_reached, rnd)
-        if won_championship:
-            round_reached = 5
+        # Round names differ per league (World Series vs "Skyline Championship Series"),
+        # so only rely on what is universal: "WON ..." marks the champion. Depth reached
+        # is derived later from the reconstructed bracket.
+        won_championship = post.lower().startswith("won")
+        round_reached = 5 if won_championship else (1 if made_playoffs else 0)
         history.append({
             "year": year,
             "team": team,
@@ -581,11 +577,17 @@ def compute_gm_stats(gms: list[dict], all_series: list[dict],
                     f"(corrected with 50/50 estimate)"
                 )
 
+            # Depth reached from the bracket path, normalised so the final is round 4
+            # and a title is 5 (the scale the dashboard labels assume).
+            round_reached = h["round_reached"]
+            actual = [r["round"] for r in path if r["source"] == "actual"]
+            if actual and not h["won_championship"]:
+                round_reached = max(1, max(actual) + max(0, 4 - len(path)))
             playoff_years.append({
                 "year": year,
                 "team": team_name,
                 "team_id": team_id,
-                "round_reached": h["round_reached"],
+                "round_reached": round_reached,
                 "won_championship": h["won_championship"],
                 "champ_p": round(champ_p, 6),
                 "path": path,
