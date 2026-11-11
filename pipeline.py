@@ -8,6 +8,8 @@ the GM-level luck statistics JSON that the dashboard HTML consumes.
 from __future__ import annotations
 
 import re
+import json
+import itertools
 import math
 import io
 import csv
@@ -35,30 +37,6 @@ def parse_reports_url(url: str) -> tuple[str, str]:
     return host, slug
 
 
-def discover_gm_ids(host: str, slug: str, seed_url: str) -> list[int]:
-    """
-    Discover human_manager IDs by scraping the seed URL and known index pages
-    for links.  Returns sorted list of IDs, or [] to fall back to sequential scan.
-    """
-    base = f"https://{host}/{slug}/reports/news/html/"
-    candidate_urls = [
-        seed_url,
-        base + "coaches/coaches.html",
-        base + "leagues/league_home.html",
-    ]
-    found: set[int] = set()
-    for url in candidate_urls:
-        try:
-            r = requests.get(url, headers={"User-Agent": MODERN_UA},
-                             timeout=15, allow_redirects=True)
-            if r.status_code == 200:
-                for m in re.finditer(r'human_manager_(\d+)\.html', r.text):
-                    found.add(int(m.group(1)))
-        except Exception:
-            pass
-    return sorted(found)
-
-
 # ─────────────────────────────────────────────────────────────
 # API helpers
 # ─────────────────────────────────────────────────────────────
@@ -72,17 +50,41 @@ MODERN_UA = (
 )
 
 
-def _api_get(slug: str, token: str, endpoint: str, stream: bool = False):
+def _api_get(slug: str, token: str, endpoint: str, stream: bool = False,
+             max_wait_s: int = 180, status_cb=None):
+    """
+    GET a StatsPlus API endpoint. The API answers rate-limited calls with HTTP 200 and the
+    text "Request too soon, wait N seconds before requesting again", so detect that and retry.
+    Returns (response, chunk_iterator) over the full body.
+    """
     url = API_BASE.format(slug=slug, endpoint=endpoint)
-    r = requests.get(url, params={"token": token}, allow_redirects=True,
-                     stream=stream, timeout=120)
-    r.raise_for_status()
-    return r
+    waited = 0
+    while True:
+        r = requests.get(url, params={"token": token}, allow_redirects=True,
+                         stream=True, timeout=120)
+        r.raise_for_status()
+        chunks = r.iter_content(chunk_size=65536)
+        first = next(chunks, b"")
+        if first.startswith(b"Request too soon"):
+            m = re.search(rb"wait (\d+) second", first)
+            wait = int(m.group(1)) + 2 if m else 30
+            r.close()
+            if waited + wait > max_wait_s:
+                raise RuntimeError(f"StatsPlus API rate limit: still blocked after waiting {waited}s. Try again in a minute.")
+            if status_cb:
+                status_cb(f"StatsPlus API rate limit — waiting {wait}s before retrying {endpoint}…")
+            time.sleep(wait)
+            waited += wait
+            continue
+        if first.startswith(b"Unknown API") or first.lower().startswith((b"invalid", b"unauthorized", b"access denied")):
+            raise RuntimeError(f"StatsPlus API error for {endpoint}: {first.decode(errors='replace')[:200]}")
+        return r, itertools.chain([first], chunks)
 
 
-def fetch_teams(slug: str, token: str) -> dict:
+def fetch_teams(slug: str, token: str, status_cb=None) -> dict:
     """Return {team_id: {abbr, name, level}} for MLB-level teams."""
-    data = _api_get(slug, token, "lgdata").json()
+    r, chunks = _api_get(slug, token, "lgdata", status_cb=status_cb)
+    data = json.loads(b"".join(chunks))
     return {
         t["team_id"]: {"abbr": t["abbr"], "name": t["name"], "level": t["level"]}
         for t in data.get("teams", [])
@@ -90,25 +92,25 @@ def fetch_teams(slug: str, token: str) -> dict:
     }
 
 
-def fetch_game_history(slug: str, token: str, progress_cb=None) -> list[dict]:
+def fetch_game_history(slug: str, token: str, progress_cb=None, status_cb=None) -> list[dict]:
     """
     Download and parse the full game history CSV.
-    Returns list of {game_id, home_team, away_team, date, game_type, runs_home, runs_away}.
     progress_cb(fraction) called periodically if provided.
     """
-    r = _api_get(slug, token, "gamehistory", stream=True)
+    r, chunks = _api_get(slug, token, "gamehistory", stream=True, status_cb=status_cb)
     total = int(r.headers.get("content-length", 0))
     buf = io.BytesIO()
     downloaded = 0
-    for chunk in r.iter_content(chunk_size=65536):
+    for chunk in chunks:
         buf.write(chunk)
         downloaded += len(chunk)
         if progress_cb and total:
             progress_cb(min(downloaded / total, 1.0))
-    buf.seek(0)
-    text = buf.read().decode("utf-8", errors="replace")
-    reader = csv.DictReader(io.StringIO(text))
-    return list(reader)
+    text = buf.getvalue().decode("utf-8", errors="replace")
+    games = list(csv.DictReader(io.StringIO(text)))
+    if not games:
+        raise RuntimeError("StatsPlus returned an empty game history — check the API token and league slug.")
+    return games
 
 
 # ─────────────────────────────────────────────────────────────
@@ -350,75 +352,108 @@ def build_bracket_path(year: int, team_id: int, all_series: list[dict],
 # GM page scraper
 # ─────────────────────────────────────────────────────────────
 
-def _fetch_gm_page(host: str, slug: str, gm_id: int, retries: int = 3) -> str | None:
-    url = REPORTS_BASE.format(host=host, slug=slug, path=f"coaches/human_manager_{gm_id}.html")
-    for attempt in range(retries):
-        try:
-            r = requests.get(url, headers={"User-Agent": MODERN_UA},
-                             allow_redirects=True, timeout=20)
-            if r.status_code == 404:
-                return None
-            if r.status_code == 429:
-                # Rate limited — back off and retry
-                wait = 2 ** attempt  # 1s, 2s, 4s
-                time.sleep(wait)
-                continue
-            r.raise_for_status()
-            return r.text
-        except requests.RequestException:
-            if attempt < retries - 1:
+# StatsPlus reports reject spoofed-browser UAs from scripts but accept a plain one;
+# try the plain UA first and fall back to a browser UA if blocked.
+_UA_CANDIDATES = [None, MODERN_UA]
+
+
+def _http_get(url: str, retries: int = 3):
+    """GET with UA fallback on 403 and exponential backoff on 429. Returns Response or None."""
+    for ua in _UA_CANDIDATES:
+        headers = {"User-Agent": ua} if ua else {}
+        for attempt in range(retries):
+            try:
+                r = requests.get(url, headers=headers, allow_redirects=True, timeout=20)
+            except requests.RequestException:
                 time.sleep(1)
+                continue
+            if r.status_code == 429:
+                time.sleep(2 ** attempt)
+                continue
+            if r.status_code == 403:
+                break  # try next UA
+            return r
     return None
 
 
+def _fetch_gm_page(host: str, slug: str, gm_id: int, retries: int = 3) -> str | None:
+    url = REPORTS_BASE.format(host=host, slug=slug, path=f"coaches/human_manager_{gm_id}.html")
+    r = _http_get(url, retries)
+    if r is None or r.status_code != 200:
+        return None
+    return r.text
+
+
+def _strip(x: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", x)).strip()
+
+
 def _parse_gm_page(html: str, gm_id: int) -> dict | None:
-    # Name
     m = re.search(r'class="reptitle">General Manager ([^<]+)<', html)
     if not m:
         return None
-    name = re.sub(r'<[^>]+>', '', m.group(1)).strip()
+    name = _strip(m.group(1))
 
-    # Current team (first bold in a specific pattern)
-    team_m = re.search(r'<b>([^<]+)</b>\s*General Manager', html)
-    current_team = re.sub(r'<[^>]+>', '', team_m.group(1)).strip() if team_m else ""
+    sub_m = re.search(r'class="repsubtitle">\s*<a[^>]*>([^<]+)</a>', html)
+    current_team = _strip(sub_m.group(1)) if sub_m else ""
 
-    # History table
     table_m = re.search(r'<table[^>]*class="[^"]*data[^"]*sortable[^"]*"[^>]*>(.*?)</table>',
                         html, re.DOTALL | re.IGNORECASE)
     if not table_m:
         return None
 
     rows = re.findall(r'<tr[^>]*>(.*?)</tr>', table_m.group(1), re.DOTALL)
+    if not rows:
+        return None
+
+    # Map columns by header name so league-specific extra columns don't matter
+    headers = [_strip(h).lower() for h in re.findall(r'<th[^>]*>(.*?)</th>', rows[0], re.DOTALL)]
+
+    def col(*names, default):
+        for i, h in enumerate(headers):
+            if h in names:
+                return i
+        return default
+
+    i_year = col("year", default=0)
+    i_team = col("team", default=1)
+    i_w = col("w", default=2)
+    i_l = col("l", default=3)
+    i_post = col("post-season wins", "post-season", "postseason", default=len(headers) - 1 if headers else 4)
+
     history = []
-    for row in rows[1:]:  # skip header
-        cells = re.findall(r'<td[^>]*>(.*?)</td>', row, re.DOTALL)
-        cells = [re.sub(r'<[^>]+>', '', c).strip() for c in cells]
-        if len(cells) < 4:
+    for row in rows[1:]:
+        raw = re.findall(r'<td[^>]*>(.*?)</td>', row, re.DOTALL)
+        cells = [_strip(c) for c in raw]
+        if len(cells) <= max(i_year, i_team, i_w, i_l):
             continue
         try:
-            year = int(cells[0])
+            year = int(cells[i_year])
         except ValueError:
             continue
-        team = cells[1]
+        team = cells[i_team]
+        tid_m = re.search(r'team_(\d+)\.html', raw[i_team])
+        team_id_hint = int(tid_m.group(1)) if tid_m else None
         try:
-            w = int(cells[2])
-            l = int(cells[3])
-        except (ValueError, IndexError):
+            w = int(cells[i_w])
+            l = int(cells[i_l])
+        except ValueError:
             w = l = 0
-        post = cells[4] if len(cells) > 4 else ""
-        made_playoffs = bool(post and post.strip() and post.strip() != "-")
-        won_championship = "Won World Series" in post or "Won Championship" in post
-        # Round reached: count how deep based on keywords
-        round_reached = 0
-        if made_playoffs:
-            round_reached = 1
-        for kw, rnd in [("Division Series", 2), ("Championship Series", 3),
-                        ("World Series", 4), ("Won World Series", 5), ("Won Championship", 5)]:
-            if kw in post:
+        post = cells[i_post] if i_post < len(cells) else ""
+        made_playoffs = bool(post and post != "-")
+        post_l = post.lower()
+        won_championship = "won world series" in post_l or "won championship" in post_l
+        round_reached = 1 if made_playoffs else 0
+        for kw, rnd in [("division series", 2), ("championship series", 3),
+                        ("world series", 4)]:
+            if kw in post_l:
                 round_reached = max(round_reached, rnd)
+        if won_championship:
+            round_reached = 5
         history.append({
             "year": year,
             "team": team,
+            "team_id_hint": team_id_hint,
             "w": w,
             "l": l,
             "made_playoffs": made_playoffs,
@@ -439,35 +474,18 @@ def _parse_gm_page(html: str, gm_id: int) -> dict | None:
 
 
 def scrape_all_gms(host: str, slug: str, progress_cb=None,
-                   max_consecutive_misses: int = 10,
-                   gm_ids: list[int] | None = None) -> list[dict]:
+                   max_consecutive_misses: int = 15) -> list[dict]:
     """
-    Fetch human_manager pages and parse GMs.
-
-    If gm_ids is provided (from discover_gm_ids), fetch exactly those IDs.
-    Otherwise fall back to sequential scan from 1 with consecutive-miss stopping.
+    Scan human_manager_{N}.html from 1 upward; stop after max_consecutive_misses
+    consecutive missing pages. Pages that exist but have no GM history
+    (commissioner / AI placeholder pages) don't count as misses.
     """
     gms = []
-
-    if gm_ids:
-        # Targeted fetch — no guessing needed
-        for gm_id in gm_ids:
-            html = _fetch_gm_page(host, slug, gm_id)
-            time.sleep(0.3)
-            if html is not None:
-                gm = _parse_gm_page(html, gm_id)
-                if gm:
-                    gms.append(gm)
-            if progress_cb:
-                progress_cb(gm_id)
-        return gms
-
-    # Fallback: sequential scan from 1
     gm_id = 1
     consecutive_misses = 0
-    while consecutive_misses < max_consecutive_misses:
+    while consecutive_misses < max_consecutive_misses and gm_id <= 500:
         html = _fetch_gm_page(host, slug, gm_id)
-        time.sleep(0.3)
+        time.sleep(0.2)
         if html is None:
             consecutive_misses += 1
         else:
@@ -476,10 +494,8 @@ def scrape_all_gms(host: str, slug: str, progress_cb=None,
             if gm:
                 gms.append(gm)
         if progress_cb:
-            progress_cb(gm_id)
+            progress_cb(gm_id, len(gms))
         gm_id += 1
-        if gm_id > 500:
-            break
     return gms
 
 
@@ -538,7 +554,8 @@ def compute_gm_stats(gms: list[dict], all_series: list[dict],
             year = h["year"]
             team_name = h["team"]
             # Resolve team_id
-            team_id = _team_id_for_abbr(team_name, teams)
+            hint = h.get("team_id_hint")
+            team_id = hint if hint in teams else _team_id_for_abbr(team_name, teams)
             if team_id is None:
                 continue
 
@@ -605,7 +622,7 @@ def compute_gm_stats(gms: list[dict], all_series: list[dict],
 # ─────────────────────────────────────────────────────────────
 
 def run_pipeline(reports_url: str, api_token: str,
-                 progress: dict | None = None) -> dict:
+                 progress: dict | None = None, min_appearances: int = 3) -> dict:
     """
     Full pipeline. progress is a dict of Streamlit progress objects:
       {step: st.progress, status: st.empty}
@@ -624,12 +641,13 @@ def run_pipeline(reports_url: str, api_token: str,
     _prog(0.02)
 
     _status(f"Fetching league structure for **{slug}**…")
-    teams = fetch_teams(slug, api_token)
+    teams = fetch_teams(slug, api_token, status_cb=_status)
     _prog(0.06)
 
     _status(f"Downloading game history ({len(teams)} teams)…")
     games = fetch_game_history(slug, api_token,
-                               progress_cb=lambda f: _prog(0.06 + f * 0.30))
+                               progress_cb=lambda f: _prog(0.06 + f * 0.30),
+                               status_cb=_status)
     _prog(0.36)
 
     _status("Reconstructing playoff series…")
@@ -640,28 +658,24 @@ def run_pipeline(reports_url: str, api_token: str,
     pythag = compute_pythag(games, set(teams.keys()))
     _prog(0.46)
 
-    _status("Discovering GM IDs from StatsPlus reports…")
-    gm_ids = discover_gm_ids(host, slug, reports_url)
-    if gm_ids:
-        _status(f"Found {len(gm_ids)} GM page IDs — fetching histories…")
-    else:
-        _status("No GM index found — scanning IDs sequentially…")
+    _status("Scraping GM histories from StatsPlus reports…")
 
-    gm_count = [0]
-    def _gm_prog(n):
-        gm_count[0] = n
-        _status(f"Scraping GM histories… (checked ID {n}, found {len(gms_ref[0])} GMs so far)")
+    def _gm_prog(n, found):
+        _status(f"Scraping GM histories… (checked ID {n}, found {found} GMs)")
 
-    gms_ref = [[]]
-    gms_ref[0] = scrape_all_gms(host, slug, progress_cb=_gm_prog,
-                                 gm_ids=gm_ids if gm_ids else None)
-    gms = gms_ref[0]
+    gms = scrape_all_gms(host, slug, progress_cb=_gm_prog)
+    if not gms:
+        raise RuntimeError(
+            f"No GM pages could be read from https://{host}/{slug}/reports/news/html/coaches/ "
+            "(human_manager_N.html). Check the reports URL, or the site may be blocking requests."
+        )
     _prog(0.78)
 
     _status(f"Computing bracket paths and luck stats for {len(gms)} GMs…")
-    gm_stats = compute_gm_stats(gms, all_series, pythag, teams)
+    gm_stats = compute_gm_stats(gms, all_series, pythag, teams,
+                                min_appearances=min_appearances)
     _prog(0.96)
 
-    _status(f"Done — {len(gm_stats)} GMs with ≥3 playoff appearances.")
+    _status(f"Done — {len(gm_stats)} of {len(gms)} GMs have ≥{min_appearances} playoff appearances.")
     _prog(1.0)
     return gm_stats

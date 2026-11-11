@@ -87,6 +87,7 @@ if submitted:
                 reports_url=reports_url,
                 api_token=api_token,
                 progress=progress,
+                min_appearances=min_appearances,
             )
         except Exception as e:
             status_box.error(f"Pipeline failed: {e}")
