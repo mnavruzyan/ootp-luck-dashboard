@@ -35,6 +35,30 @@ def parse_reports_url(url: str) -> tuple[str, str]:
     return host, slug
 
 
+def discover_gm_ids(host: str, slug: str, seed_url: str) -> list[int]:
+    """
+    Discover human_manager IDs by scraping the seed URL and known index pages
+    for links.  Returns sorted list of IDs, or [] to fall back to sequential scan.
+    """
+    base = f"https://{host}/{slug}/reports/news/html/"
+    candidate_urls = [
+        seed_url,
+        base + "coaches/coaches.html",
+        base + "leagues/league_home.html",
+    ]
+    found: set[int] = set()
+    for url in candidate_urls:
+        try:
+            r = requests.get(url, headers={"User-Agent": MODERN_UA},
+                             timeout=15, allow_redirects=True)
+            if r.status_code == 200:
+                for m in re.finditer(r'human_manager_(\d+)\.html', r.text):
+                    found.add(int(m.group(1)))
+        except Exception:
+            pass
+    return sorted(found)
+
+
 # ─────────────────────────────────────────────────────────────
 # API helpers
 # ─────────────────────────────────────────────────────────────
@@ -415,17 +439,35 @@ def _parse_gm_page(html: str, gm_id: int) -> dict | None:
 
 
 def scrape_all_gms(host: str, slug: str, progress_cb=None,
-                   max_consecutive_misses: int = 10) -> list[dict]:
+                   max_consecutive_misses: int = 10,
+                   gm_ids: list[int] | None = None) -> list[dict]:
     """
-    Scan human_manager_{N}.html from 1 upward.
-    Stops after max_consecutive_misses consecutive 404s.
+    Fetch human_manager pages and parse GMs.
+
+    If gm_ids is provided (from discover_gm_ids), fetch exactly those IDs.
+    Otherwise fall back to sequential scan from 1 with consecutive-miss stopping.
     """
     gms = []
+
+    if gm_ids:
+        # Targeted fetch — no guessing needed
+        for gm_id in gm_ids:
+            html = _fetch_gm_page(host, slug, gm_id)
+            time.sleep(0.3)
+            if html is not None:
+                gm = _parse_gm_page(html, gm_id)
+                if gm:
+                    gms.append(gm)
+            if progress_cb:
+                progress_cb(gm_id)
+        return gms
+
+    # Fallback: sequential scan from 1
     gm_id = 1
     consecutive_misses = 0
     while consecutive_misses < max_consecutive_misses:
         html = _fetch_gm_page(host, slug, gm_id)
-        time.sleep(0.3)  # polite delay — avoids 429s
+        time.sleep(0.3)
         if html is None:
             consecutive_misses += 1
         else:
@@ -436,7 +478,6 @@ def scrape_all_gms(host: str, slug: str, progress_cb=None,
         if progress_cb:
             progress_cb(gm_id)
         gm_id += 1
-        # Safety cap — no league has 500 GMs
         if gm_id > 500:
             break
     return gms
@@ -599,14 +640,21 @@ def run_pipeline(reports_url: str, api_token: str,
     pythag = compute_pythag(games, set(teams.keys()))
     _prog(0.46)
 
-    _status("Scraping GM histories from StatsPlus reports…")
+    _status("Discovering GM IDs from StatsPlus reports…")
+    gm_ids = discover_gm_ids(host, slug, reports_url)
+    if gm_ids:
+        _status(f"Found {len(gm_ids)} GM page IDs — fetching histories…")
+    else:
+        _status("No GM index found — scanning IDs sequentially…")
+
     gm_count = [0]
     def _gm_prog(n):
         gm_count[0] = n
-        _status(f"Scraping GM histories… (checked {n} IDs, found {len(gms_ref[0])} GMs)")
+        _status(f"Scraping GM histories… (checked ID {n}, found {len(gms_ref[0])} GMs so far)")
 
     gms_ref = [[]]
-    gms_ref[0] = scrape_all_gms(host, slug, progress_cb=_gm_prog)
+    gms_ref[0] = scrape_all_gms(host, slug, progress_cb=_gm_prog,
+                                 gm_ids=gm_ids if gm_ids else None)
     gms = gms_ref[0]
     _prog(0.78)
 
