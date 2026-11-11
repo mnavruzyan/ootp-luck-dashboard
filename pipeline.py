@@ -11,6 +11,7 @@ import re
 import math
 import io
 import csv
+import time
 from collections import defaultdict
 from typing import Optional
 from urllib.parse import urlparse
@@ -325,17 +326,25 @@ def build_bracket_path(year: int, team_id: int, all_series: list[dict],
 # GM page scraper
 # ─────────────────────────────────────────────────────────────
 
-def _fetch_gm_page(host: str, slug: str, gm_id: int) -> str | None:
+def _fetch_gm_page(host: str, slug: str, gm_id: int, retries: int = 3) -> str | None:
     url = REPORTS_BASE.format(host=host, slug=slug, path=f"coaches/human_manager_{gm_id}.html")
-    try:
-        r = requests.get(url, headers={"User-Agent": MODERN_UA},
-                         allow_redirects=True, timeout=20)
-        if r.status_code == 404:
-            return None
-        r.raise_for_status()
-        return r.text
-    except requests.RequestException:
-        return None
+    for attempt in range(retries):
+        try:
+            r = requests.get(url, headers={"User-Agent": MODERN_UA},
+                             allow_redirects=True, timeout=20)
+            if r.status_code == 404:
+                return None
+            if r.status_code == 429:
+                # Rate limited — back off and retry
+                wait = 2 ** attempt  # 1s, 2s, 4s
+                time.sleep(wait)
+                continue
+            r.raise_for_status()
+            return r.text
+        except requests.RequestException:
+            if attempt < retries - 1:
+                time.sleep(1)
+    return None
 
 
 def _parse_gm_page(html: str, gm_id: int) -> dict | None:
@@ -416,6 +425,7 @@ def scrape_all_gms(host: str, slug: str, progress_cb=None,
     consecutive_misses = 0
     while consecutive_misses < max_consecutive_misses:
         html = _fetch_gm_page(host, slug, gm_id)
+        time.sleep(0.3)  # polite delay — avoids 429s
         if html is None:
             consecutive_misses += 1
         else:
