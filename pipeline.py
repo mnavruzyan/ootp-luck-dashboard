@@ -502,25 +502,39 @@ def compute_gm_stats(gms: list[dict], all_series: list[dict],
                 continue
 
             path = build_bracket_path(year, team_id, all_series, pythag, id2abbr)
-            if not path:
+
+            # Years with no game data at all — still count the appearance and
+            # any championship, but we cannot compute a probability.
+            no_game_data = not path and year not in year_rounds
+            if not path and not no_game_data:
+                # Partial year (incomplete bracket) — skip, already handled below
                 continue
 
             # Championship probability = product of all series probs
-            champ_p = 1.0
-            for r in path:
-                champ_p *= r["sp"]
-
-            # Apply correction for incomplete years
-            data_incomplete = year in incomplete_years
+            champ_p = 0.0  # 0 contribution to exp_champ for no-data years
+            data_incomplete = False
             incomplete_note = ""
-            if data_incomplete:
-                rounds_in_data = year_rounds.get(year, 0)
-                missing = full_rounds - rounds_in_data
-                correction = 0.5 ** missing
-                champ_p *= correction
+
+            if path:
+                champ_p = 1.0
+                for r in path:
+                    champ_p *= r["sp"]
+
+                # Apply correction for partially truncated years
+                data_incomplete = year in incomplete_years
+                if data_incomplete:
+                    rounds_in_data = year_rounds.get(year, 0)
+                    missing = full_rounds - rounds_in_data
+                    champ_p *= 0.5 ** missing
+                    incomplete_note = (
+                        f"{year} game data truncated — {missing} rounds missing "
+                        f"(corrected with 50/50 estimate)"
+                    )
+            elif no_game_data:
+                data_incomplete = True
                 incomplete_note = (
-                    f"{year} game data truncated — {missing} rounds missing "
-                    f"(corrected with 50/50 estimate)"
+                    f"{year} game data missing entirely — "
+                    f"championship counted but probability not calculated"
                 )
 
             playoff_years.append({
@@ -542,7 +556,8 @@ def compute_gm_stats(gms: list[dict], all_series: list[dict],
         act_champ = sum(1 for py in playoff_years if py["won_championship"])
         p_no_champ = 1.0
         for py in playoff_years:
-            p_no_champ *= (1.0 - py["champ_p"])
+            if py["champ_p"] > 0:  # skip no-data years (champ_p=0) — they don't inform the probability
+                p_no_champ *= (1.0 - py["champ_p"])
 
         result[str(gm["id"])] = {
             "id": gm["id"],
