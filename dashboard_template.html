@@ -1,0 +1,573 @@
+<title>{{LEAGUE_NAME}} — GM Fortune Report</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
+<style>
+:root {
+  --bg:#f5f4f1;--surface:#ffffff;--surface2:#f0eee9;--border:#e2dfd8;
+  --fg:#1a1916;--fg2:#4a4844;--fg3:#8c8a85;
+  --accent:#c8440a;--accent-dim:rgba(200,68,10,.12);
+  --lucky:#1a7a4a;--lucky-dim:rgba(26,122,74,.12);
+  --unlucky:#c8440a;--unlucky-dim:rgba(200,68,10,.12);
+  --neutral:#6b6964;
+  --gold:#d4a800;--gold-dim:rgba(212,168,0,.15);
+  --shadow:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.04);
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#12110e;--surface:#1e1c18;--surface2:#252320;--border:#2e2c27;
+  --fg:#f0ede7;--fg2:#b0ada6;--fg3:#6e6b64;
+  --accent:#e06030;--accent-dim:rgba(224,96,48,.14);
+  --lucky:#35b06a;--lucky-dim:rgba(53,176,106,.14);
+  --unlucky:#e06030;--unlucky-dim:rgba(224,96,48,.14);
+  --neutral:#8c8a85;--gold:#e8bb20;--gold-dim:rgba(232,187,32,.15);
+  --shadow:0 1px 3px rgba(0,0,0,.3);color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#12110e;--surface:#1e1c18;--surface2:#252320;--border:#2e2c27;
+  --fg:#f0ede7;--fg2:#b0ada6;--fg3:#6e6b64;
+  --accent:#e06030;--accent-dim:rgba(224,96,48,.14);
+  --lucky:#35b06a;--lucky-dim:rgba(53,176,106,.14);
+  --unlucky:#e06030;--unlucky-dim:rgba(224,96,48,.14);
+  --neutral:#8c8a85;--gold:#e8bb20;--gold-dim:rgba(232,187,32,.15);
+  --shadow:0 1px 3px rgba(0,0,0,.3);color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',-apple-system,sans-serif;font-size:14px;line-height:1.5;background:var(--bg);color:var(--fg);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0;}
+.site-header{background:var(--surface);border-bottom:1px solid var(--border);padding:20px 0 0;position:sticky;top:env(safe-area-inset-top,0px);z-index:50;}
+.site-header-inner{max-width:1100px;margin:0 auto;padding-inline:max(20px,env(safe-area-inset-left,0px));}
+.site-header h1{font-size:17px;font-weight:700;letter-spacing:-.02em;color:var(--fg);}
+.site-header h1 span{color:var(--accent);}
+.site-header .subtitle{font-size:12px;color:var(--fg3);margin-top:2px;}
+.nav-tabs{display:flex;gap:0;margin-top:16px;overflow-x:auto;scrollbar-width:none;}
+.nav-tabs::-webkit-scrollbar{display:none;}
+.nav-tab{padding:8px 16px;font-size:13px;font-weight:500;color:var(--fg3);background:none;border:none;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;transition:color .15s,border-color .15s;}
+.nav-tab:hover{color:var(--fg);}
+.nav-tab.active{color:var(--accent);border-color:var(--accent);}
+.page{display:none;padding:28px 0 48px;max-width:1100px;margin:0 auto;}
+.page.active{display:block;}
+.section{margin-bottom:36px;}
+.section-title{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--fg3);margin-bottom:14px;}
+.stat-row{display:flex;flex-wrap:wrap;gap:12px;}
+.stat-tile{flex:1 1 150px;min-width:0;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 18px;box-shadow:var(--shadow);}
+.stat-tile .label{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--fg3);margin-bottom:6px;}
+.stat-tile .value{font-size:28px;font-weight:700;letter-spacing:-.03em;color:var(--fg);font-family:'JetBrains Mono',monospace;}
+.stat-tile .sub{font-size:12px;color:var(--fg3);margin-top:4px;}
+.stat-tile.hl{background:var(--gold-dim);border-color:var(--gold);}
+.stat-tile.unlucky .value{color:var(--unlucky);}
+.stat-tile.lucky .value{color:var(--lucky);}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px 20px 16px;box-shadow:var(--shadow);overflow:hidden;}
+.card-title{font-size:13px;font-weight:600;color:var(--fg);margin-bottom:4px;}
+.card-sub{font-size:12px;color:var(--fg3);margin-bottom:16px;}
+.table-scroll{overflow-x:auto;}
+table{width:100%;border-collapse:collapse;font-size:13px;}
+th{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--fg3);padding:8px 12px;text-align:left;border-bottom:1px solid var(--border);background:var(--surface2);position:sticky;top:0;cursor:pointer;user-select:none;}
+th:hover{color:var(--fg);}
+th.sorted{color:var(--fg);}
+td{padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:middle;}
+tr:last-child td{border-bottom:none;}
+tr:hover td{background:var(--surface2);}
+.luck-pos{color:var(--lucky);font-weight:600;font-family:'JetBrains Mono',monospace;}
+.luck-neg{color:var(--unlucky);font-weight:600;font-family:'JetBrains Mono',monospace;}
+.luck-zero{color:var(--fg3);font-family:'JetBrains Mono',monospace;}
+.mono{font-family:'JetBrains Mono',monospace;}
+.ring-badge{display:inline-block;width:16px;height:16px;line-height:16px;text-align:center;border-radius:50%;font-size:10px;font-weight:700;background:var(--gold);color:#000;margin-right:2px;}
+select{font-family:inherit;font-size:13px;padding:7px 12px;border-radius:7px;border:1px solid var(--border);background:var(--surface);color:var(--fg);outline:none;cursor:pointer;min-width:220px;}
+select:focus{border-color:var(--accent);}
+.selector-row{display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap;}
+.selector-row label{font-size:13px;font-weight:500;color:var(--fg2);}
+.year-timeline{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:20px;}
+.yr-btn{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:500;padding:4px 9px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--fg2);cursor:pointer;transition:all .1s;}
+.yr-btn:hover{border-color:var(--accent);color:var(--fg);}
+.yr-btn.active{background:var(--accent);border-color:var(--accent);color:#fff;}
+.yr-btn.won{border-color:var(--lucky);color:var(--lucky);}
+.yr-btn.won.active{background:var(--lucky);border-color:var(--lucky);color:#fff;}
+.yr-btn.incomplete{border-style:dashed;opacity:.7;}
+.data-warn{background:rgba(200,120,0,.12);border:1px solid rgba(200,120,0,.4);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--gold);margin-bottom:12px;}
+.bracket-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+@media(max-width:700px){.bracket-row{grid-template-columns:repeat(2,1fr);}}
+.bc{border-radius:8px;padding:14px;border:1px solid var(--border);background:var(--surface);}
+.bc .bc-round{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--fg3);margin-bottom:8px;}
+.bc .bc-opp{font-size:20px;font-weight:700;letter-spacing:-.02em;font-family:'JetBrains Mono',monospace;margin-bottom:6px;}
+.bc .bc-pyt{font-size:11px;color:var(--fg3);margin-bottom:8px;}
+.prob-bar{height:6px;border-radius:3px;background:var(--border);margin-bottom:8px;overflow:hidden;}
+.prob-fill{height:100%;border-radius:3px;background:var(--accent);transition:width .3s;}
+.bc-sp{font-size:13px;font-weight:600;margin-bottom:6px;font-family:'JetBrains Mono',monospace;}
+.bc .bc-res{display:inline-block;font-size:11px;font-weight:700;padding:3px 8px;border-radius:5px;letter-spacing:.04em;}
+.res-won{background:var(--lucky-dim);color:var(--lucky);}
+.res-lost{background:var(--unlucky-dim);color:var(--unlucky);}
+.res-cf{font-size:10px;color:var(--fg3);font-style:italic;}
+.bc.won-cell{border-color:var(--lucky);background:var(--lucky-dim);}
+.bc.lost-cell{border-color:var(--unlucky);}
+.bc.cf-cell{opacity:.75;border-style:dashed;}
+.year-table td .rnd-pill{display:inline-block;font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;letter-spacing:.03em;}
+.rnd-wc{background:var(--surface2);color:var(--fg3);}
+.rnd-ds{background:var(--accent-dim);color:var(--accent);}
+.rnd-cs{background:rgba(100,100,220,.15);color:#6060cc;}
+.rnd-ws{background:var(--gold-dim);color:var(--gold);}
+.rnd-ch{background:var(--lucky-dim);color:var(--lucky);}
+.p-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;}
+.p-cell{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 14px;}
+.p-cell .pc-name{font-size:13px;font-weight:600;color:var(--fg);margin-bottom:2px;}
+.p-cell .pc-team{font-size:11px;color:var(--fg3);margin-bottom:6px;}
+.p-cell .pc-prob{font-size:20px;font-weight:700;font-family:'JetBrains Mono',monospace;}
+.pc-high{color:var(--unlucky);}
+.pc-mid{color:var(--gold);}
+.pc-low{color:var(--lucky);}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+@media(max-width:700px){.two-col{grid-template-columns:1fr;}}
+.spacer-8{height:8px;}.spacer-16{height:16px;}
+.dark-toggle{position:fixed;bottom:20px;right:20px;z-index:100;width:36px;height:36px;border-radius:50%;background:var(--surface);border:1px solid var(--border);color:var(--fg2);cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow);}
+.hero-banner{background:linear-gradient(135deg,var(--gold-dim) 0%,var(--accent-dim) 100%);border:1px solid var(--gold);border-radius:12px;padding:20px 22px;margin-bottom:24px;}
+.hero-banner h2{font-size:15px;font-weight:700;margin-bottom:4px;}
+.hero-banner p{font-size:13px;color:var(--fg2);}
+</style>
+
+<header class="site-header">
+  <div class="site-header-inner">
+    <h1>{{LEAGUE_NAME}} <span>GM Fortune Report</span></h1>
+    <p class="subtitle" id="headerSubtitle">Loading…</p>
+    <nav class="nav-tabs">
+      <button class="nav-tab active" onclick="showPage('overview')">League Overview</button>
+      <button class="nav-tab" onclick="showPage('gm')">GM Deep Dive</button>
+      <button class="nav-tab" onclick="showPage('bracket')">Bracket History</button>
+      <button class="nav-tab" onclick="showPage('method')">Methodology</button>
+    </nav>
+  </div>
+</header>
+
+<button class="dark-toggle" onclick="toggleDark()" title="Toggle dark mode">🌙</button>
+
+<!-- OVERVIEW -->
+<div id="page-overview" class="page active">
+  <div class="section">
+    <div class="section-title">GM Luck Rankings</div>
+    <div class="card">
+      <div class="card-title">Expected vs. Actual Championships — All Active GMs (≥3 playoff appearances)</div>
+      <div class="card-sub">Luck delta = actual titles − expected titles (Pythagorean bracket model, full career across all teams managed). Hover any bar for details.</div>
+      <div style="position:relative"><canvas id="luckChart" style="max-height:620px;"></canvas></div>
+    </div>
+  </div>
+  <div class="section">
+    <div class="section-title">Full GM Rankings Table</div>
+    <div class="card">
+      <div class="table-scroll">
+        <table id="gmTable">
+          <thead><tr>
+            <th onclick="sortTable(0)">Rank <span>↕</span></th>
+            <th onclick="sortTable(1)">GM <span>↕</span></th>
+            <th onclick="sortTable(2)">Current Team <span>↕</span></th>
+            <th onclick="sortTable(3)">Apps <span>↕</span></th>
+            <th onclick="sortTable(4)">Titles <span>↕</span></th>
+            <th onclick="sortTable(5)">Exp. Titles <span>↕</span></th>
+            <th onclick="sortTable(6)">Luck Δ <span>↕</span></th>
+            <th onclick="sortTable(7)">P(0 rings) <span>↕</span></th>
+          </tr></thead>
+          <tbody id="gmTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="section">
+    <div class="section-title">Ring-less GMs — How Unlikely?</div>
+    <div class="card">
+      <div class="card-title">P(Zero Championships) for GMs with 0 Titles, ≥5 Appearances</div>
+      <div class="card-sub">Lower = more unlucky. Sorted by P(0 rings) ascending.</div>
+      <div id="noRingGrid" class="p-grid" style="margin-top:4px;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- GM DEEP DIVE -->
+<div id="page-gm" class="page">
+  <div class="selector-row">
+    <label for="gmSel">Select GM:</label>
+    <select id="gmSel" onchange="renderGM()"></select>
+  </div>
+  <div id="gmContent"></div>
+</div>
+
+<!-- BRACKET HISTORY -->
+<div id="page-bracket" class="page">
+  <div class="selector-row">
+    <label for="gmBracketSel">Select GM:</label>
+    <select id="gmBracketSel" onchange="renderBracketGM()"></select>
+  </div>
+  <div id="bracketGMBanner"></div>
+  <div class="section">
+    <div class="section-title">Select Playoff Year</div>
+    <div class="year-timeline" id="bracketYears"></div>
+    <div class="bracket-row" id="bracketDetail"></div>
+  </div>
+  <div class="section">
+    <div class="section-title">P(Championship) by Season</div>
+    <div class="card">
+      <div class="card-title">Championship Probability — Each Playoff Year</div>
+      <div class="card-sub">Green = won championship · Orange = reached WS · Grey = other. Hover for round-by-round detail.</div>
+      <div style="position:relative"><canvas id="champChart" style="max-height:280px;"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<!-- METHODOLOGY -->
+<div id="page-method" class="page">
+  <div class="hero-banner">
+    <h2>How the luck numbers are calculated</h2>
+    <p>A bracket simulation model using Pythagorean win% and the Log5 formula — same methodology used in MLB sabermetric analysis.</p>
+  </div>
+  <div class="two-col">
+    <div class="section">
+      <div class="section-title">Step 1 — Team Strength</div>
+      <div class="card">
+        <div class="card-title">Pythagorean Win%</div>
+        <div class="card-sub">Measures true team quality from run differential, reducing noise from one-run game luck.</div>
+        <div style="margin:12px 0;padding:12px;background:var(--surface2);border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:12px;">
+          Pyth = RS<sup>1.83</sup> / (RS<sup>1.83</sup> + RA<sup>1.83</sup>)
+        </div>
+        <p style="font-size:13px;color:var(--fg2);">RS = runs scored, RA = runs allowed. The 1.83 exponent is the baseball-calibrated value. A team scoring 800 and allowing 700 has Pyth ≈ .566.</p>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title">Step 2 — Head-to-Head Probability</div>
+      <div class="card">
+        <div class="card-title">Log5 Formula</div>
+        <div class="card-sub">Bill James's formula for the probability that team A beats team B in a single game.</div>
+        <div style="margin:12px 0;padding:12px;background:var(--surface2);border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:12px;">
+          P(A beats B) = (A − A×B) / (A + B − 2×A×B)
+        </div>
+        <p style="font-size:13px;color:var(--fg2);">Where A and B are each team's Pythagorean win%. Correctly reduces to A when B = .500 (league-average opponent).</p>
+      </div>
+    </div>
+  </div>
+  <div class="two-col">
+    <div class="section">
+      <div class="section-title">Step 3 — Series Win Probability</div>
+      <div class="card">
+        <div class="card-title">Binomial Series Formula</div>
+        <div class="card-sub">Exact calculation — no simulation needed. Format auto-detected from actual series data.</div>
+        <div style="margin:12px 0;padding:12px;background:var(--surface2);border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.8;">
+          P(win BO7) = Σ<sub>k=4..7</sub> C(k−1,3) × p<sup>4</sup> × (1−p)<sup>k−4</sup>
+        </div>
+        <p style="font-size:13px;color:var(--fg2);">p = single-game win probability from Log5. Sums over all ways to win exactly 4 games in 4–7 total. Series length (BO3/BO5/BO7) is detected automatically per round.</p>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title">Step 4 — Full Bracket Path</div>
+      <div class="card">
+        <div class="card-title">Actual + Counterfactual Rounds</div>
+        <div class="card-sub">For rounds after elimination, the model follows the actual bracket to find real would-have-faced opponents.</div>
+        <p style="font-size:13px;color:var(--fg2);margin-bottom:10px;">Once a team is eliminated, the model traces who <em>actually beat</em> their eliminator through the remaining rounds. This gives the true counterfactual opponents — not random 50/50.</p>
+        <p style="font-size:13px;color:var(--fg2);">Championship probability = product of all round probabilities. For a Round 1 exit: R1 × counterfactual R2 × R3 × R4.</p>
+      </div>
+    </div>
+  </div>
+  <div class="section">
+    <div class="section-title">Step 5 — Career Statistics</div>
+    <div class="card">
+      <div class="two-col" style="gap:20px;">
+        <div>
+          <div class="card-title" style="margin-bottom:8px;">Expected Championships</div>
+          <div style="padding:10px;background:var(--surface2);border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:12px;margin-bottom:8px;">Exp = Σ P(champ)<sub>year</sub></div>
+          <p style="font-size:13px;color:var(--fg2);">Sum of championship probabilities across all playoff appearances. Tracks across team changes — the GM, not the franchise.</p>
+        </div>
+        <div>
+          <div class="card-title" style="margin-bottom:8px;">Luck Delta &amp; P(0 Rings)</div>
+          <div style="padding:10px;background:var(--surface2);border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:12px;margin-bottom:8px;line-height:1.8;">
+            Luck Δ = Actual − Expected<br>
+            P(0 rings) = Π (1 − P<sub>year</sub>)
+          </div>
+          <p style="font-size:13px;color:var(--fg2);">P(0 rings) multiplies per-year no-championship probabilities across the full career. Lower = more unlucky to still have zero titles.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="section">
+    <div class="section-title">Data Notes</div>
+    <div class="card">
+      <div class="card-title">Sources &amp; Caveats</div>
+      <ul style="font-size:13px;color:var(--fg2);padding-left:18px;line-height:2;">
+        <li>Game data: full league game history via StatsPlus API</li>
+        <li>GM histories: scraped from StatsPlus report pages for all active managers</li>
+        <li>Career tracking follows GMs across team changes</li>
+        <li>Minimum threshold: 3 playoff appearances required for inclusion</li>
+        <li>Years with incomplete game data are flagged ⚠ and championship probabilities are corrected using 50/50 estimates for missing rounds</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+const GM_RAW = {{GM_DATA}};
+
+// ── Helpers ──────────────────────────────────────────────────
+function fmtLuck(v){return (v>0?'+':'')+v.toFixed(2);}
+function luckCls(v){return v>0.1?'luck-pos':v<-0.1?'luck-neg':'luck-zero';}
+function probCls(p){return p<0.15?'pc-low':p<0.4?'pc-mid':'pc-high';}
+function cc(){
+  const s=getComputedStyle(document.documentElement);
+  return{lucky:s.getPropertyValue('--lucky').trim(),unlucky:s.getPropertyValue('--unlucky').trim(),
+    gold:s.getPropertyValue('--gold').trim(),neutral:s.getPropertyValue('--neutral').trim(),
+    border:s.getPropertyValue('--border').trim(),fg:s.getPropertyValue('--fg').trim(),
+    fg2:s.getPropertyValue('--fg2').trim(),fg3:s.getPropertyValue('--fg3').trim(),
+    surface:s.getPropertyValue('--surface').trim(),accent:s.getPropertyValue('--accent').trim()};
+}
+function roundPill(r){
+  if(r>=5)return '<span class="rnd-pill rnd-ch">★ CHAMP</span>';
+  if(r===4)return '<span class="rnd-pill rnd-ws">WS</span>';
+  if(r===3)return '<span class="rnd-pill rnd-cs">CS</span>';
+  if(r===2)return '<span class="rnd-pill rnd-ds">DS</span>';
+  if(r===1)return '<span class="rnd-pill rnd-wc">WC</span>';
+  return '<span class="rnd-pill rnd-wc">—</span>';
+}
+
+const gmsSorted=Object.values(GM_RAW).sort((a,b)=>a.luck-b.luck);
+const gmLookup={};Object.values(GM_RAW).forEach(g=>gmLookup[g.id]=g);
+
+// Header subtitle
+document.getElementById('headerSubtitle').textContent=
+  `${Object.keys(GM_RAW).length} GMs · GM-level bracket simulation · Career records across all teams managed`;
+
+// ── Overview: Luck Chart ─────────────────────────────────────
+let luckChartInst=null;
+function buildLuckChart(){
+  if(luckChartInst)luckChartInst.destroy();
+  const c=cc();
+  const labels=gmsSorted.map(g=>g.name);
+  const vals=gmsSorted.map(g=>g.luck);
+  const colors=gmsSorted.map(g=>g.luck>=0?c.lucky:c.unlucky);
+  const ctx=document.getElementById('luckChart').getContext('2d');
+  luckChartInst=new Chart(ctx,{
+    type:'bar',
+    data:{labels,datasets:[{label:'Luck Δ',data:vals,backgroundColor:colors,borderRadius:4,borderSkipped:false}]},
+    options:{
+      indexAxis:'y',responsive:true,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{
+        const g=gmsSorted[ctx.dataIndex];
+        return[` Luck: ${fmtLuck(g.luck)}`,` Apps: ${g.appearances}`,
+          ` Titles: ${g.act_champ}`,` Expected: ${g.exp_champ}`];
+      }}}},
+      scales:{
+        x:{grid:{color:c.border},ticks:{color:c.fg3,font:{family:'JetBrains Mono',size:11}},
+          title:{display:true,text:'Luck Delta (titles over/under expectation)',color:c.fg3,font:{size:11}}},
+        y:{grid:{display:false},ticks:{display:false}}
+      }
+    }
+  });
+}
+
+// ── Overview: Table ─────────────────────────────────────────
+let tableData=gmsSorted.map((g,i)=>({...g,rank:i+1}));
+let sortCol=6,sortAsc=true;
+function buildTable(){
+  const tbody=document.getElementById('gmTableBody');
+  const sorted=[...tableData].sort((a,b)=>{
+    const cols=['rank','name','current_team','appearances','act_champ','exp_champ','luck','p_no_champ'];
+    const k=cols[sortCol];const va=a[k]||'',vb=b[k]||'';
+    return sortAsc?(va>vb?1:-1):(va<vb?1:-1);
+  });
+  tbody.innerHTML=sorted.map(g=>{
+    const rings=Array.from({length:g.act_champ},()=>'<span class="ring-badge">★</span>').join('');
+    return`<tr>
+      <td class="mono">${g.rank}</td>
+      <td><strong>${g.name}</strong></td>
+      <td style="color:var(--fg3);font-size:12px">${g.current_team||'—'}</td>
+      <td class="mono">${g.appearances}</td>
+      <td>${rings}<span class="mono">${g.act_champ}</span></td>
+      <td class="mono">${g.exp_champ.toFixed(2)}</td>
+      <td class="${luckCls(g.luck)}">${fmtLuck(g.luck)}</td>
+      <td class="mono">${(g.p_no_champ*100).toFixed(1)}%</td>
+    </tr>`;
+  }).join('');
+}
+function sortTable(col){
+  if(sortCol===col)sortAsc=!sortAsc;else{sortCol=col;sortAsc=col!==6;}
+  document.querySelectorAll('#gmTable th').forEach((th,i)=>{
+    th.classList.toggle('sorted',i===col);
+    const s=th.querySelector('span');
+    if(i===col&&s)s.textContent=sortAsc?'↑':'↓';else if(s)s.textContent='↕';
+  });
+  buildTable();
+}
+
+// ── Overview: No-Ring Grid ───────────────────────────────────
+function buildNoRingGrid(){
+  const noRing=Object.values(GM_RAW).filter(g=>g.act_champ===0&&g.appearances>=5)
+    .sort((a,b)=>a.p_no_champ-b.p_no_champ);
+  document.getElementById('noRingGrid').innerHTML=noRing.map(g=>`
+    <div class="p-cell">
+      <div class="pc-name">${g.name}</div>
+      <div class="pc-team">${g.current_team||'—'} · ${g.appearances} apps</div>
+      <div class="pc-prob ${probCls(g.p_no_champ)}">${(g.p_no_champ*100).toFixed(1)}%</div>
+      <div style="font-size:11px;color:var(--fg3);margin-top:3px">chance of zero titles</div>
+    </div>`).join('');
+}
+
+// ── Selectors ────────────────────────────────────────────────
+function buildSelectors(){
+  const sorted=[...Object.values(GM_RAW)].sort((a,b)=>a.name.localeCompare(b.name));
+  const opts=sorted.map(g=>`<option value="${g.id}">${g.name}${g.current_team?' ('+g.current_team+')':''}</option>`).join('');
+  document.getElementById('gmSel').innerHTML=opts;
+  document.getElementById('gmBracketSel').innerHTML=opts;
+}
+
+// ── GM Deep Dive ─────────────────────────────────────────────
+let yrChartInst=null;
+function renderGM(){
+  const gid=parseInt(document.getElementById('gmSel').value);
+  const g=gmLookup[gid];if(!g)return;
+  const ld=g.luck;const ls=ld>0?'+':'';
+  document.getElementById('gmContent').innerHTML=`
+    <div class="stat-row">
+      <div class="stat-tile"><div class="label">Playoff Apps</div><div class="value">${g.appearances}</div><div class="sub">career total</div></div>
+      <div class="stat-tile"><div class="label">Actual Titles</div><div class="value">${g.act_champ}</div><div class="sub">${g.act_champ===0?'still searching':g.act_champ===1?'ring earned':'rings earned'}</div></div>
+      <div class="stat-tile"><div class="label">Expected Titles</div><div class="value">${g.exp_champ.toFixed(2)}</div><div class="sub">Pythagorean bracket model</div></div>
+      <div class="stat-tile ${ld>=0?'lucky':'unlucky'}"><div class="label">Luck Delta</div><div class="value">${ls}${ld.toFixed(2)}</div><div class="sub">${ld>=0?'above expectation':'below expectation'}</div></div>
+      <div class="stat-tile"><div class="label">P(0 Rings)</div><div class="value">${(g.p_no_champ*100).toFixed(1)}%</div><div class="sub">${g.act_champ===0?'this happened':'did not happen'}</div></div>
+    </div>
+    <div class="spacer-16"></div>
+    <div class="section-title">P(Championship) by Season</div>
+    <div class="card">
+      <div class="card-title">Championship Probability — Each Playoff Year</div>
+      <div class="card-sub">Green = won · Orange = WS · Grey = other exit.</div>
+      <div style="position:relative"><canvas id="yrChart" style="max-height:260px;"></canvas></div>
+    </div>
+    <div class="spacer-8"></div>
+    <div class="card">
+      <div class="card-title">Playoff Appearances</div>
+      <div class="table-scroll">
+        <table class="year-table">
+          <thead><tr><th>Year</th><th>Team</th><th>Deepest Round</th><th>P(Championship)</th><th>Result</th></tr></thead>
+          <tbody>${g.playoff_years.map(py=>`
+            <tr>
+              <td class="mono">${py.year}</td>
+              <td>${py.team}</td>
+              <td>${roundPill(py.round_reached)}</td>
+              <td class="mono">${(py.champ_p*100).toFixed(1)}%</td>
+              <td>${py.won_championship?'<span class="ring-badge">★</span> WON':py.round_reached===4?'★ WS loss':py.round_reached===3?'CS exit':py.round_reached===2?'DS exit':'WC exit'}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+  buildYrChart(g);
+}
+function buildYrChart(g){
+  if(yrChartInst)yrChartInst.destroy();
+  const c=cc();
+  const years=g.playoff_years.map(py=>py.year);
+  const vals=g.playoff_years.map(py=>+(py.champ_p*100).toFixed(1));
+  const colors=g.playoff_years.map(py=>py.won_championship?c.lucky:py.round_reached===4?c.gold:c.neutral);
+  const ctx=document.getElementById('yrChart').getContext('2d');
+  yrChartInst=new Chart(ctx,{
+    type:'bar',
+    data:{labels:years,datasets:[{data:vals,backgroundColor:colors,borderRadius:4}]},
+    options:{responsive:true,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{
+      const py=g.playoff_years[ctx.dataIndex];
+      return[`P(Champ): ${ctx.parsed.y.toFixed(1)}%`,`Round: ${['','WC','DS','CS','WS','★ CHAMP'][py.round_reached]||py.round_reached}`,`Team: ${py.team}`];
+    }}}},
+    scales:{x:{grid:{display:false},ticks:{color:c.fg3,font:{family:'JetBrains Mono',size:11}}},
+      y:{grid:{color:c.border},ticks:{color:c.fg3},title:{display:true,text:'% chance of championship',color:c.fg3,font:{size:11}}}}}
+  });
+}
+
+// ── Bracket History ──────────────────────────────────────────
+let selectedBracketYear=null;let champChartInst=null;
+function renderBracketGM(){
+  const gid=parseInt(document.getElementById('gmBracketSel').value);
+  const g=gmLookup[gid];if(!g)return;
+  document.getElementById('bracketGMBanner').innerHTML=`
+    <div class="hero-banner" style="margin-bottom:20px;">
+      <h2>${g.name}${g.current_team?' — '+g.current_team:''}</h2>
+      <p>${g.appearances} playoff appearances · ${g.act_champ} title${g.act_champ!==1?'s':''} · Expected ${g.exp_champ.toFixed(2)} · Luck ${fmtLuck(g.luck)}</p>
+    </div>`;
+  const years=g.playoff_years.map(py=>py.year);
+  document.getElementById('bracketYears').innerHTML=years.map(y=>{
+    const py=g.playoff_years.find(p=>p.year===y);
+    const wonCls=py.won_championship?' won':'';
+    const incCls=py.data_incomplete?' incomplete':'';
+    return`<button class="yr-btn${wonCls}${incCls}" onclick="selectBracketYear(${y})">${y}${py.won_championship?' ★':py.data_incomplete?' ⚠':''}</button>`;
+  }).join('');
+  selectedBracketYear=years[0];
+  document.querySelectorAll('.yr-btn')[0]?.classList.add('active');
+  renderBracket(g,selectedBracketYear);
+  buildChampChart(g,years);
+}
+function selectBracketYear(y){
+  selectedBracketYear=y;
+  document.querySelectorAll('.yr-btn').forEach(b=>{
+    const txt=b.textContent.trim();
+    b.classList.toggle('active',txt===String(y)||txt.startsWith(y+' '));
+  });
+  const gid=parseInt(document.getElementById('gmBracketSel').value);
+  renderBracket(gmLookup[gid],y);
+}
+function renderBracket(g,year){
+  const py=g.playoff_years.find(p=>p.year===year);
+  if(!py){document.getElementById('bracketDetail').innerHTML='';return;}
+  const warnHtml=py.data_incomplete?`<div class="data-warn">⚠ ${py.incomplete_note||'Game data incomplete for this season — championship probability adjusted with 50/50 estimates for missing rounds.'}</div>`:'';
+  document.getElementById('bracketDetail').innerHTML=warnHtml+py.path.map(r=>{
+    const isActual=r.source==='actual';
+    const won=r.res==='WON',lost=r.res==='LOST';
+    let cls='bc';
+    if(isActual&&won)cls+=' won-cell';
+    else if(isActual&&lost)cls+=' lost-cell';
+    else cls+=' cf-cell';
+    const prob=Math.round(r.sp*100);
+    const score=isActual&&r.mw!=null?` ${r.mw}–${r.ow}`:'';
+    return`<div class="${cls}">
+      <div class="bc-round">${r.round_name}${!isActual?' (counterfactual)':''}</div>
+      <div class="bc-opp">vs ${r.opp}</div>
+      <div class="bc-pyt">Me ${r.mp.toFixed(3)} · Opp ${r.op.toFixed(3)}</div>
+      <div class="prob-bar"><div class="prob-fill" style="width:${prob}%"></div></div>
+      <div class="bc-sp">${prob}% series win chance</div>
+      ${isActual?`<span class="bc-res ${won?'res-won':'res-lost'}">${r.res}${score}</span>`:`<span class="res-cf">Did not play</span>`}
+    </div>`;
+  }).join('');
+}
+function buildChampChart(g,years){
+  if(champChartInst)champChartInst.destroy();
+  const c=cc();
+  const vals=g.playoff_years.map(py=>+(py.champ_p*100).toFixed(1));
+  const colors=g.playoff_years.map(py=>py.won_championship?c.lucky:py.round_reached===4?c.gold:c.neutral);
+  const ctx=document.getElementById('champChart').getContext('2d');
+  champChartInst=new Chart(ctx,{
+    type:'bar',
+    data:{labels:years,datasets:[{data:vals,backgroundColor:colors,borderRadius:4}]},
+    options:{responsive:true,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{
+      const py=g.playoff_years[ctx.dataIndex];
+      const lines=[`P(Champ): ${ctx.parsed.y.toFixed(1)}%`,`Team: ${py.team}`];
+      py.path.forEach(r=>{const src=r.source==='actual'?'':' (cf)';lines.push(`  ${r.round_name}${src} vs ${r.opp}: ${(r.sp*100).toFixed(0)}%${r.res?' → '+r.res:''}`);});
+      return lines;
+    }}}},
+    scales:{x:{grid:{display:false},ticks:{color:c.fg3,font:{family:'JetBrains Mono',size:11}}},
+      y:{grid:{color:c.border},ticks:{color:c.fg3},title:{display:true,text:'% chance of championship',color:c.fg3,font:{size:11}}}}}
+  });
+}
+
+// ── Nav ───────────────────────────────────────────────────────
+function showPage(id){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(b=>b.classList.remove('active'));
+  document.getElementById('page-'+id).classList.add('active');
+  const labels={overview:'League',gm:'GM Deep',bracket:'Bracket',method:'Method'};
+  document.querySelectorAll('.nav-tab').forEach(b=>{if(b.textContent.includes(labels[id]))b.classList.add('active');});
+  if(id==='gm')renderGM();
+  if(id==='bracket')renderBracketGM();
+}
+function toggleDark(){
+  const r=document.documentElement;
+  r.setAttribute('data-theme',r.getAttribute('data-theme')==='dark'?'light':'dark');
+  setTimeout(()=>{buildLuckChart();
+    if(document.getElementById('page-gm').classList.contains('active'))renderGM();
+    if(document.getElementById('page-bracket').classList.contains('active'))renderBracketGM();
+  },50);
+}
+
+// ── Init ──────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded',()=>{
+  buildLuckChart();buildTable();buildNoRingGrid();buildSelectors();
+});
+</script>
