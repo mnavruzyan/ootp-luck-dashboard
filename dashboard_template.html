@@ -507,8 +507,7 @@ function selectBracketYear(y){
 function renderBracket(g,year){
   const py=g.playoff_years.find(p=>p.year===year);
   if(!py){document.getElementById('bracketDetail').innerHTML='';return;}
-  const warnHtml=py.data_incomplete?`<div class="data-warn">⚠ ${py.incomplete_note||'Game data incomplete for this season.'}</div>`:'';
-  if(!py.path||py.path.length===0){document.getElementById('bracketDetail').innerHTML=warnHtml+'<p style="color:var(--fg3);font-size:13px;padding:8px 0">No game-level data available for this season.</p>';return;}
+  const warnHtml=py.data_incomplete?`<div class="data-warn">⚠ ${py.incomplete_note||'Game data incomplete for this season — championship probability adjusted with 50/50 estimates for missing rounds.'}</div>`:'';
   document.getElementById('bracketDetail').innerHTML=warnHtml+py.path.map(r=>{
     const isActual=r.source==='actual';
     const won=r.res==='WON',lost=r.res==='LOST';
